@@ -1,0 +1,212 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "id": "c4f1d2cb",
+   "metadata": {},
+   "source": [
+    "# ✍️ Building a CNN That Reads Handwritten Digits\n",
+    "\n",
+    "In this notebook we will build a **Convolutional Neural Network (CNN)** that looks at a picture of a handwritten digit (0–9) and tells us which digit it is.\n",
+    "\n",
+    "We do it in three parts:\n",
+    "\n",
+    "| Part | What we do |\n",
+    "|---|---|\n",
+    "| **Part 1** | Train a CNN on **MNIST**, a famous dataset of 70,000 handwritten digits |\n",
+    "| **Part 2** | Test the model on **our own photo** of a digit, cleaning the photo up with **OpenCV** |\n",
+    "| **Part 3** | Do the same cleanup again using **Pillow (PIL)** instead of OpenCV |\n",
+    "\n",
+    "### How to use this notebook\n",
+    "- Run the cells **from top to bottom, in order**. Later cells depend on variables created by earlier ones.\n",
+    "- Read the text above each cell *before* you run it, then read the comments (lines starting with `#`) inside the cell.\n",
+    "- After a cell runs, compare the output to the **\"What you should see\"** note.\n",
+    "\n",
+    "### The big idea (read this first!)\n",
+    "A neural network can only learn what it was shown. The model in Part 1 is trained on MNIST images: **white digits on a black background, 28 × 28 pixels, centered, thick strokes.** A photo from your phone looks nothing like that: it is large, colored, has shadows, and the digit is dark ink on light paper. So most of Parts 2 and 3 is about one job: **making our photo look like an MNIST image.**"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "e635a285",
+   "metadata": {},
+   "source": [
+    "---\n",
+    "# Part 1: Training the CNN on MNIST\n",
+    "\n",
+    "## Step 1: Import the libraries\n",
+    "\n",
+    "A **library** is a collection of ready-made code we can reuse instead of writing everything from scratch.\n",
+    "\n",
+    "| Library | What we use it for |\n",
+    "|---|---|\n",
+    "| `numpy` | Storing and calculating with numbers. **Images are just grids of numbers**, so NumPy is the backbone of this notebook. |\n",
+    "| `matplotlib` | Drawing images and graphs |\n",
+    "| `tensorflow.keras` | Building and training neural networks |"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "id": "208433b7",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# NumPy: fast arrays and maths. We nickname it \"np\" so we can type less.\n",
+    "import numpy as np\n",
+    "\n",
+    "# Matplotlib's plotting tool. We nickname it \"plt\".\n",
+    "import matplotlib.pyplot as plt\n",
+    "\n",
+    "# Sequential: a model made of layers stacked one after another, like a sandwich.\n",
+    "from tensorflow.keras import Sequential\n",
+    "\n",
+    "# The layer types (the \"ingredients\") we will use in our model:\n",
+    "from tensorflow.keras.layers import (\n",
+    "    Input,         # tells the model what shape of data to expect\n",
+    "    Conv2D,        # convolution layer: finds patterns such as edges and curves\n",
+    "    MaxPooling2D,  # shrinks the image while keeping the strongest signals\n",
+    "    Flatten,       # turns a 2D grid of features into one long list\n",
+    "    Dense,         # a normal fully-connected layer that makes decisions\n",
+    "    Dropout        # randomly switches off neurons during training to prevent over-fitting\n",
+    ")\n",
+    "\n",
+    "# MNIST: the dataset of handwritten digits that ships with Keras\n",
+    "from tensorflow.keras.datasets import mnist"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "8232f2c6",
+   "metadata": {},
+   "source": [
+    "## Step 2: Load the MNIST dataset\n",
+    "\n",
+    "MNIST contains **70,000** grayscale images of handwritten digits, already split for us:\n",
+    "\n",
+    "- **Training set**: 60,000 images the model *learns from*\n",
+    "- **Test set**: 10,000 images the model has *never seen*, used to check if it really learned\n",
+    "\n",
+    "Each image comes with a **label**, the correct answer (0–9). The naming convention is:\n",
+    "\n",
+    "- `X` = the inputs (images)\n",
+    "- `Y` = the answers (labels)\n",
+    "\n",
+    "**What you should see:** `(60000, 28, 28)` means 60,000 images, each 28 pixels tall and 28 pixels wide. Labels are just one number per image, so their shape is `(60000,)`."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "id": "6243997a",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Training images: (60000, 28, 28)\n",
+      "Training labels: (60000,)\n",
+      "Testing images: (10000, 28, 28)\n",
+      "Testing labels: (10000,)\n"
+     ]
+    }
+   ],
+   "source": [
+    "# mnist.load_data() downloads the dataset the first time (then reuses the saved copy).\n",
+    "# It returns two pairs: (training images, training labels) and (test images, test labels).\n",
+    "(X_train, Y_train), (X_test, Y_test) = mnist.load_data()\n",
+    "\n",
+    "# .shape tells us the dimensions of an array.\n",
+    "print(\"Training images:\", X_train.shape)   # (60000, 28, 28) -> 60,000 images of 28 x 28 pixels\n",
+    "print(\"Training labels:\", Y_train.shape)   # (60000,)        -> one label per image\n",
+    "\n",
+    "print(\"Testing images:\", X_test.shape)     # (10000, 28, 28)\n",
+    "print(\"Testing labels:\", Y_test.shape)     # (10000,)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "94c7fd04",
+   "metadata": {},
+   "source": [
+    "### Peek at the raw numbers\n",
+    "\n",
+    "Before we do anything fancy, let's see what an image *really* is. To the computer, one image is a 28 × 28 grid of numbers. Each number is a pixel's brightness:\n",
+    "\n",
+    "- `0` = black\n",
+    "- `255` = white\n",
+    "- numbers in between = shades of gray"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "id": "4c2ba552",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Data type of the pixels: uint8\n",
+      "Smallest pixel value: 0\n",
+      "Largest pixel value: 255\n",
+      "The label (correct answer) for this image: 5\n",
+      "[[  0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0\n",
+      "    0   0   0   0   0   0   0   0   0   0]\n",
+      " [  0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0\n",
+      "    0   0   0   0   0   0   0   0   0   0]\n",
+      " [  0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0\n",
+      "    0   0   0   0   0   0   0   0   0   0]\n",
+      " [  0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0\n",
+      "    0   0   0   0   0   0   0   0   0   0]\n",
+      " [  0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0\n",
+      "    0   0   0   0   0   0   0   0   0   0]\n",
+      " [  0   0   0   0   0   0   0   0   0   0   0   0   3  18  18  18 126 136\n",
+      "  175  26 166 255 247 127   0   0   0   0]\n",
+      " [  0   0   0   0   0   0   0   0  30  36  94 154 170 253 253 253 253 253\n",
+      "  225 172 253 242 195  64   0   0   0   0]\n",
+      " [  0   0   0   0   0   0   0  49 238 253 253 253 253 253 253 253 253 251\n",
+      "   93  82  82  56  39   0   0   0   0   0]\n",
+      " [  0   0   0   0   0   0   0  18 219 253 253 253 253 253 198 182 247 241\n",
+      "    0   0   0   0   0   0   0   0   0   0]\n",
+      " [  0   0   0   0   0   0   0   0  80 156 107 253 253 205  11   0  43 154\n",
+      "    0   0   0   0   0   0   0   0   0   0]]\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Look at the very first training image (index 0)\n",
+    "print(\"Data type of the pixels:\", X_train[0].dtype)           # uint8 = whole numbers from 0 to 255\n",
+    "print(\"Smallest pixel value:\", X_train[0].min())              # 0   -> black (the background)\n",
+    "print(\"Largest pixel value:\", X_train[0].max())               # 255 -> white (the ink)\n",
+    "print(\"The label (correct answer) for this image:\", Y_train[0])\n",
+    "\n",
+    "# Print the first 10 rows of the grid. Notice the zeros (background)\n",
+    "# and where the bigger numbers start to appear (the digit).\n",
+    "print(X_train[0][:10])"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "6806e627",
+   "metadata": {},
+   "source": [
+    "## Step 3: Visualize the data\n",
+    "\n",
+    "Always **look at your data** before training. It helps you spot problems and understand what the model will learn from.\n",
+    "\n",
+    "Key things to notice: the digits are **white on black**, they have different handwriting styles, and every image has the same size."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "id": "8127ab45",
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "image/png": "iVBORw0KGgoAAAANSUhEUgAAA94AAAHICAYAAAC4fTKEAAAAOnRFWHRTb2Z0d2FyZQBNYXRwbG90bGliIHZlcnNpb24zLjEwLjksIGh0dHBzOi8vbWF0cGxvdGxpYi5vcmcvJkbTWQAAAAlwSFlzAAAPYQAAD2EBqD+naQAANlhJREFUeJzt3QvYVVP+OPD9pqRQSw0uQy7l0iSFSFIu5ZowREaS+x+p6JEJY2jG/ZJxvwxj0zCP8XOJMQxGuU4axmh+IdIQKeRSoZt0/s8+v6discacvE6L4b3pzu64pGjYtLjIuLi7OKCgoKCyM0NPT+o9H50d18u3aL+8nOH8uR9Amr85M2eP0T2O3jBv8W3j19fOuvc/q98WnK4nKq1K9b429n+GzH47eG2K8XjN6/fGv13a4V06a3q+238uJ6m7p0f30+5Ouvs9u2p9qVj7Xv9L66jM29H13W7N2+7t7b/e/8f0376483zW+z765XvevW//+qf9v90lfb9u95d8Xbfb597n29Ovd3X9/2j1Wp9e/Vb9571L+W5l+vWnufH1+fX0+/a01H3vX9p3p71m/n239vW+28z796n76Vtf+Xqj//Xq2j/d+m/V3/zXb+a/T2/9s3v151G/31fO//V5tfTveK732n+Xy/e+9vWqX49q7p1t/n76x/v19/L0lW72Kk2bWp6Wb4u6Z987/e5lC78f65X6uT6v9/s+N5n//71329c3K3r27Vv/j/p5/48b111+f/fXv//65b9/f326r/yN8tH7/z7u+6f//e67v/fvvv1+aefLJJ//555/r/X/n+fPnZ912y9/7+/vL75eN2+3X3/89f6N9L8v7f+v79t+r/v7v4uPj7//+o+Xfv//+9Lfrr7++7m338+PqV//8/3X333e/5vLw0bWqfP/97//v7r99tvj92pGjBgRz3/88cdv864D//8+r2268f77333h//+v//8tFHH8Wv//73b/Lrrz89c2ZcLP7+W206cO7v/+v3/82T//z//333/7/+sK1bX21ff//1///49+f///v/rvv//+1rT//f//9//n//7/5/3u/+sK6v//ffv//+tf49fff8//P//e//99/0n/rvv77//u57/Xf9v/P2rX/9f/Xv//ff//j//z//1v6u///fvfff//eefVw6X/rvrf+8//9v7v/j///1//+9/7v//1+/u3+q49Vf/vv//+r18v//v7v2/r18qev6/v//tv7vf/fv7//9t/Vv7ff//93vv7ff/rv/9/X////9v/f///73/u//++9r//+/b9vv3///9v/P0r/+87//fv///9r69v//f/7//+n7v7n7r+/8u1t81vvv33//3//P3f87rX7rX32//Wv7////u67t/v7/9ff7e9vvvv7v/+uf7//r/+/u///7//68v///rv9fr//9v/37/9ff//v9/rf//rXv9/ff/9f//7//8/v7/39v73+tvff//7//v/r//++f//t+/X//7/v///fv///++f//v//v9//f//u/9/3/vvv/f/7v//rf//rf//v///r//vv/u//9v/6r/++v//e//u7/v//u/9/v//r//vf/9f//v//u7v+//t//f/u7/v7v/+v/++//7v/3v/u7v//+/u7/7//r//u/v+//v/r/9f/u7//vr/v+//v//u/v/v/7//r/v/r/7v//u/v/v/u7v//+v/r/r/r/r/v/u7v//v//v/v/v/v/v/v/v/v/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/r/h"
+}
